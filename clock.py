@@ -42,9 +42,24 @@ def parse_time_response(response):
     unix_time = response["unixtime"]
     return unix_time - UNIX_EPOCH_DIFF
 
+def parse_time_string(response):
+    """ Parses the Time String Instead of the EPOCH time"""
+    date_time_string = response['datetime']
+    # (year, month, day[, hour[, minute[, second[, microsecond[, tzinfo]]]]])
+    # 2020-07-04T02:01:46.283707-04:00
+    date, time_add_zone = date_time_string.split('T')
+    year, month, day = date.split('-')
+    zone_regex = ure.compile(r'[+-]')
+    time_data, _ = zone_regex.split(time_add_zone)
+    hour, minute, second = time_data.split(':')
+    macrosecond, microsecond = second.split('.')
+    time_data_tup = (int(year), int(month), int(day), int(hour), int(minute), int(macrosecond), int(microsecond), 0)
+    return time_data_tup[0:3] + (0,) + time_data_tup[3:6] + (0,)
+
 def set_rtc_time(time_data, rtc_inst):
     """ Sets the Parsed Time onto the Machine RTC """
     rtc_inst.init(time_data)
+    return rtc_inst
 
 def format_rtc_time(rtc_inst):
     """Formats Time Tuple to string"""
@@ -52,7 +67,7 @@ def format_rtc_time(rtc_inst):
     timeset = rtc_inst.datetime()
     return {
         "date": "{}/{}/{}".format(timeset[2], timeset[1], timeset[0]),
-        "time": "{}:{}:{}".format(timeset[3], timeset[4], timeset[5])
+        "time": "{}:{}:{}".format(timeset[4], timeset[5], timeset[6])
     }
 
 def prep_display_data(rtc_formatted_time):
@@ -80,15 +95,16 @@ def start_clock():
     while not wlan_adapter.isconnected():
         time.sleep(1)
     api_response = world_time_api()
-    epoch_adjusted_time = parse_time_response(api_response)
+    # epoch_adjusted_time = parse_time_response(api_response)
+    time_data = parse_time_string(api_response)
     rtc_instance = RTC()
-    set_rtc_time(utime.localtime(epoch_adjusted_time), rtc_instance)
+    rtc_instance = set_rtc_time(time_data, rtc_instance)
     wlan_adapter.active(False)
     while True:
+        # gc.collect()
         formatted_rtc_timedata = format_rtc_time(rtc_instance)
         display_data = prep_display_data(formatted_rtc_timedata)
         print_data(display, display_data)
         time.sleep(1)
-        gc.collect()
 
 start_clock()
