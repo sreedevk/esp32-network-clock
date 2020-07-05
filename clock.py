@@ -11,11 +11,13 @@ SCL_PIN = 23
 DISPLAY_WIDTH_PX = 128
 DISPLAY_HEIGHT_PX = 32
 NEWLINE_OFFSET_PX = 8
+INPUT_SIG_PIN = 16
 UNIX_EPOCH_DIFF = 946684800
 AP_ESSID = 'devstation-2.4g'
-AP_SECURITY_KEY = 'sreedev@3232712'
-TIMEZONE = "America/New_York"
-TIME_API_URL = "http://worldtimeapi.org/api/timezone/{}".format(TIMEZONE)
+AP_SECURITY_KEY = 'XXXXXXXX'
+SUPPORTED_TIMEZONES = ["America/New_York", "Asia/Kolkata", "Europe/Rome"]
+CURRENT_TIMEZONE_IDX = 0
+TIME_API_URL = "http://worldtimeapi.org/api/timezone/{}"
 
 # initialize display
 def init_display():
@@ -31,16 +33,29 @@ def init_network():
     wlan.connect(AP_ESSID, AP_SECURITY_KEY)
     return wlan
 
+def switch_timezone():
+    """ Switch Between Timezones """
+    global CURRENT_TIMEZONE_IDX
+    if CURRENT_TIMEZONE_IDX >= (len(SUPPORTED_TIMEZONES) - 1):
+        CURRENT_TIMEZONE_IDX = 0
+    else:
+        CURRENT_TIMEZONE_IDX += 1
+
+def fetch_current_timezone():
+    """Fetch & Return currrent timezone string"""
+    return SUPPORTED_TIMEZONES[CURRENT_TIMEZONE_IDX]
+
+# Initialize Input Mechanism
+def initialize_input():
+    """ Initializes Input Stream on Pin """
+    return Pin(INPUT_SIG_PIN, Pin.IN)
+
+
 # API Call for Fetching Time
 def world_time_api():
     """ Fetch & Parse WorldTimeApi """
-    request_raw_response = requests.get(TIME_API_URL)
+    request_raw_response = requests.get(TIME_API_URL.format(fetch_current_timezone()))
     return request_raw_response.json()
-
-def parse_time_response(response):
-    """ Parses the API EPOCH Time Response & Adjusts the UNIX EPOCH Diff """
-    unix_time = response["unixtime"]
-    return unix_time - UNIX_EPOCH_DIFF
 
 def parse_time_string(response):
     """ Parses the Time String Instead of the EPOCH time"""
@@ -56,15 +71,14 @@ def parse_time_string(response):
     time_data_tup = (int(year), int(month), int(day), int(hour), int(minute), int(macrosecond), int(microsecond), 0)
     return time_data_tup[0:3] + (0,) + time_data_tup[3:6] + (0,)
 
-def set_rtc_time(time_data, rtc_inst):
+def set_rtc_time(time_data):
     """ Sets the Parsed Time onto the Machine RTC """
-    rtc_inst.init(time_data)
-    return rtc_inst
+    RTC().init(time_data)
 
-def format_rtc_time(rtc_inst):
+def format_rtc_time():
     """Formats Time Tuple to string"""
     # (year, month, mday, hour, minute, second, weekday, yearday)
-    timeset = rtc_inst.datetime()
+    timeset = RTC().datetime()
     return {
         "date": "{}/{}/{}".format(timeset[2], timeset[1], timeset[0]),
         "time": "{}:{}:{}".format(timeset[4], timeset[5], timeset[6])
@@ -73,7 +87,7 @@ def format_rtc_time(rtc_inst):
 def prep_display_data(rtc_formatted_time):
     """ prepares the data to be printed / displayed"""
     return [
-        ure.sub('_', ' ', TIMEZONE.split('/')[1]),
+        ure.sub('_', ' ', fetch_current_timezone().split('/')[1]),
         "date: {}".format(rtc_formatted_time['date']),
         "time: {}".format(rtc_formatted_time['time']),
         "memory: {}".format(gc.mem_free())
@@ -88,23 +102,32 @@ def print_data(display, data):
         disp_y += NEWLINE_OFFSET_PX
     display.show()
 
-def start_clock():
-    """ Initialize the clock, call apis, set time & update display"""
+def initialize_clock():
+    """ Initialize the clock, call apis, set time """
     display = init_display()
     wlan_adapter = init_network()
+    input_stx = initialize_input()
     while not wlan_adapter.isconnected():
         time.sleep(1)
     api_response = world_time_api()
-    # epoch_adjusted_time = parse_time_response(api_response)
     time_data = parse_time_string(api_response)
-    rtc_instance = RTC()
-    rtc_instance = set_rtc_time(time_data, rtc_instance)
+    set_rtc_time(time_data)
     wlan_adapter.active(False)
+    return display, input_stx
+
+
+def start_clock():
+    """  display time """
+    gc.collect()
+    display, input_stx = initialize_clock()
     while True:
-        # gc.collect()
-        formatted_rtc_timedata = format_rtc_time(rtc_instance)
+        if input_stx.value() == 0:
+            switch_timezone()
+            break
+        formatted_rtc_timedata = format_rtc_time()
         display_data = prep_display_data(formatted_rtc_timedata)
         print_data(display, display_data)
         time.sleep(1)
+    start_clock()
 
 start_clock()
